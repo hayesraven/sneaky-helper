@@ -1,12 +1,15 @@
 import os, discord
 from dotenv import load_dotenv
+import ctypes
+import ctypes.util
 
 load_dotenv()
 bot = discord.Bot(auto_sync_commands=True)
 token = str(os.getenv("TOKEN"))
 connections = {}
 
-discord.opus.load_opus('/opt/homebrew/Cellar/opus/1.4/lib/libopus.a')
+a = ctypes.util.find_library('opus')
+discord.opus.load_opus(a)
 if not discord.opus.is_loaded():
     raise RuntimeError('Opus failed to load')
 
@@ -21,7 +24,9 @@ async def hello(ctx):
 @bot.slash_command(name="help", description="Ask for help from me!")
 async def help(ctx):
     embed_var = discord.Embed(title="Commands you can use!", 
-                              description="**/hello** to say hi!\n**/help** to see this message", color=0x546e7a)
+                              description=("**/hello** to say hi!\n",
+                                            "**/help** to see this message",
+                                            "**/start** to start a recording in the current channel"), color=0x546e7a)
     await ctx.send(embed=embed_var)
     
 async def once_done(sink: discord.sinks, channel: discord.TextChannel, *args):
@@ -35,8 +40,10 @@ async def once_done(sink: discord.sinks, channel: discord.TextChannel, *args):
     ]
     
     await sink.vc.disconnect()  # Disconnect from voice channel
-    files = [discord.File(audio.file, f"{user_id}.{sink.encoding}") for user_id, audio in sink.audio_data.items()]  # List down the files
-    await channel.send(f"Finished recording audio for: {', '.join(recorded_users)}.", file=files)
+    
+    files = [discord.File(audio.file, f"{user_id}.{sink.encoding}") for user_id, audio in sink.audio_data.items()]  # List down the files.
+    await channel.send(f"Finished recording audio for: {', '.join(recorded_users)}.", files=files)
+    
     
 @bot.slash_command(name="start", description="Record in my current channel!")
 async def start_recording(ctx):
@@ -60,7 +67,7 @@ async def start_recording(ctx):
     
     await ctx.respond("Started recording!")
     
-@bot.command()
+@bot.slash_command(name="stop", description="Stop the recording and leave!")
 async def stop_recording(ctx):
     if ctx.guild.id in connections:  # Check if the guild is in the cache.
         vc = connections[ctx.guild.id]
