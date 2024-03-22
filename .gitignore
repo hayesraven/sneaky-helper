@@ -161,3 +161,11 @@ cython_debug/
 
 # This is just in case I accidentally push before cleaning up recordings
 *.wav
+
+# folders to ignore
+tests/
+cogs/tests.py
+unprocessed/*
+processed/*
+models/*
+TODO

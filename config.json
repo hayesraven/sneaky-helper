@@ -1,0 +1,11 @@
+{
+    "prefix": "Sneaky",
+    "ignore_members": [
+        1139938844834271242
+    ],
+    "model_size_or_path": "large-v2",
+    "device": "cpu",
+    "compute_type": "float32",
+    "download_root": "models/",
+    "local_files_only": false
+}
