@@ -166,7 +166,6 @@ class Transcription(commands.Cog, name="transcription"):
                 unfilepath + file,
                 language="en",
                 condition_on_previous_text=False,
-                vad_filter=True
                 )
             self.logger.info(f"Detected language '{info.language}'"
                              f" with probability {info.language_probability}")

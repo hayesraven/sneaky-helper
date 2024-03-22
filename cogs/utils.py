@@ -88,7 +88,6 @@ class Utils(commands.Cog, name="utils"):
         
         for user_id in config["ignore_members"]:
             user = await self.bot.fetch_user(user_id)
-            print(user)
             users += user.name + '\n'
             
         await ctx.respond("Currently ignoring the following members for "
