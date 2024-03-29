@@ -169,3 +169,4 @@ unprocessed/*
 processed/*
 models/*
 TODO
+.DS_Store

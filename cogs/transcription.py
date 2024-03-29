@@ -85,22 +85,23 @@ class Transcription(commands.Cog, name="transcription"):
         Finds the newest final transcript and sends it to the channel
         '''
         channel_name = 'transcripts'
-        channel = get(ctx.guild.channels, name=channel_name)
+        #channel = get(ctx.guild.channels, name=channel_name)
+        channel = get(self.bot.get_all_channels(), name=channel_name)
         
         if channel:
             channel_id = channel.id
             
-            for file in [f for f in os.listdir(pfilepath) 
+            for filename in [f for f in os.listdir(pfilepath) 
                     if os.path.isfile(os.path.join(pfilepath, f))]: 
-                match = re.search(r"_final\.txt", file)
+                match = re.search(r".*_final\.txt", filename)
                 if match:
-                    filename = pfilepath + file
+                    filename = pfilepath + filename
                     
                     with open(filename, 'rb') as f:
-                        file = discord.File(f)
+                        file = discord.File(f, filename=filename)
                         await channel.send(file=file)
         else:
-            ctx.respond(f"ERROR: {channel_name} cannot be found!")
+            self.logger.error(f"ERROR: {channel_name} cannot be found!")
         
     def preprocess(self, test: bool):
         '''
@@ -151,6 +152,8 @@ class Transcription(commands.Cog, name="transcription"):
         transcribe:
         Handles WhisperX transcription of the files
         '''
+        self.logger.info(f"Now transcribing...")
+        
         model = faster_whisper.WhisperModel(
             model_size_or_path=self.bot.model_size_or_path,
             device=self.bot.device,
@@ -166,6 +169,8 @@ class Transcription(commands.Cog, name="transcription"):
                 unfilepath + file,
                 language="en",
                 condition_on_previous_text=False,
+                word_timestamps=True,
+                vad_filter=True
                 )
             self.logger.info(f"Detected language '{info.language}'"
                              f" with probability {info.language_probability}")
@@ -198,8 +203,8 @@ class Transcription(commands.Cog, name="transcription"):
             if date == "" and match_user is not None:
                 date = match_user.group('date')
                 
-            with open(filename, 'r') as f:
-                data = f.read()
+            with open(filename, 'rb') as f:
+                data = f.read().decode(errors='ignore')
             
             for line in data.splitlines():
                 match_script = re.match(reg_transcript, line)
@@ -219,6 +224,8 @@ class Transcription(commands.Cog, name="transcription"):
         with open(f"{pfilepath}{date}_final.txt", 'w') as f:
             for line in final:
                 f.write(line['string'])
+                
+        self.bot.loop.create_task(self.send_file(ctx=None, pfilepath=pfilepath))
     
 # this adds the cogs to bot
 def setup(bot) -> None:
