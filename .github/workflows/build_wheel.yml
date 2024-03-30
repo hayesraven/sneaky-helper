@@ -1,0 +1,12 @@
+name: Build sneaky-helper wheel
+on: [push]
+
+jobs:
+    Build_sneaky_helper:
+        runs-on: ubuntu-latest
+        steps:
+            - run: echo "Initiating sneaky-helper build..."
+            - run: python -m pip install --upgrade pip setuptools wheel
+            - run: pip install -e .[build,test]
+            - run: python -m build
+            - run: echo "sneaky-helper build complete..."
