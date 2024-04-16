@@ -30,7 +30,8 @@ class Recording(commands.Cog, name="recording"):
         vc.start_recording(
             discord.sinks.WaveSink(),            # Sink to use 
             self.once_done,                          # Coroutine when done recording
-            ctx.channel                         # Channel to disconnect from
+            ctx.channel,                         # Channel to disconnect from
+            start_sync=True
         )
         
         recording = True
@@ -62,7 +63,7 @@ class Recording(commands.Cog, name="recording"):
         today = datetime.date.today().strftime("%d%b%Y")
 
         for user_id, audio, in sink.audio_data.items():
-            if user_id in self.bot.config['ignore_members']:
+            if user_id not in self.bot.config['ignore_members']:
                 username = await self.bot.fetch_user(user_id)
                 recorded_users.append(str(username))
                 filename = f"unprocessed/{today}_{username}.{sink.encoding}"
