@@ -1,53 +1,11 @@
 from discord.ext import commands
-from discord.utils import get
-import pydub
-import os
+import discord
 import faster_whisper
 import logging
+import os
+import pydub
 import re
-import discord
 
-"""
-These are the arguments the whisper model takes in:
-Option: default
-
-model_size_or_path: 
-Size of the model to use (tiny, tiny.en, base, base.en,
-small, small.en, medium, medium.en, large-v1, large-v2, large-v3, or large), 
-a path to a converted model directory, or a CTranslate2-converted Whisper 
-model ID from the HF Hub. When a size or a model ID is configured, the 
-converted model is downloaded from the Hugging Face Hub.
-
-device: auto
-Device to use for computation ("cpu", "cuda", "auto"). 
-
-device_index: 0
-Device ID to use. The model can also be loaded on multiple GPUs by passing a
-ist of IDs (e.g. [0, 1, 2, 3]). In that case, multiple transcriptions can run
-in parallel when transcribe() is called from multiple Python threads (see also
-num_workers).
-
-compute_type: default
-Type to use for computation. See https://opennmt.net/CTranslate2/quantization.html.
-
-cpu_threads: 4
-Number of threads to use when running on CPU. A non zero value overrides the 
-OMP_NUM_THREADS environment variable. 
-
-num_workers: 1
-When transcribe() is called from multiple Python threads, having multiple
-workers enables true parallelism when running the model (concurrent calls
-to self.model.generate() will run in parallel). This can improve the global
-throughput at the cost of increased memory usage.
-
-download_root: 
-Directory where the models should be saved. If not set, the models are saved in
-the standard Hugging Face cache directory. 
-
-local_files_only: False
-If True, avoid downloading the file and return the path to the local cached
-file if it exists.
-"""
 
 class Transcription(commands.Cog, name="transcription"):
     def __init__(self, bot) -> None:
@@ -57,176 +15,171 @@ class Transcription(commands.Cog, name="transcription"):
         self.bot = bot
         self.logger = logging.getLogger(__name__)
         logging.basicConfig(level=logging.DEBUG)
-        
-    async def preprocess_init(self, test: bool):
-        '''
-        preprocess_init:
-        Allows transcribe to be ran in separate thread
-        '''
-        await self.bot.loop.run_in_executor(None, self.preprocess, test)
-    
-    async def transcribe_init(self, unfilepath, test: bool):
-        '''
-        transcribe_init:
-        Allows transcribe to be ran in separate thread
-        '''
-        await self.bot.loop.run_in_executor(None, self.transcribe, unfilepath, test)
-    
-    async def merge_init(self, pfilepath):
-        '''
-        merge_init:
-        Allows merge to be ran in separate thread
-        '''
-        await self.bot.loop.run_in_executor(None, self.merge, pfilepath)
-    
-    async def send_file(self, ctx, pfilepath):
-        '''
-        send_file:
-        Finds the newest final transcript and sends it to the channel
-        '''
-        channel_name = 'transcripts'
-        #channel = get(ctx.guild.channels, name=channel_name)
-        channel = get(self.bot.get_all_channels(), name=channel_name)
-        
-        if channel:
-            channel_id = channel.id
-            
-            for filename in [f for f in os.listdir(pfilepath) 
-                    if os.path.isfile(os.path.join(pfilepath, f))]: 
-                match = re.search(r".*_final\.txt", filename)
-                if match:
-                    filename = pfilepath + filename
-                    
-                    with open(filename, 'rb') as f:
-                        file = discord.File(f, filename=filename)
-                        await channel.send(file=file)
-        else:
-            self.logger.error(f"ERROR: {channel_name} cannot be found!")
-        
-    def preprocess(self, test: bool):
-        '''
-        preprocess:
-        take in files, process them, and prep them for transcription
-        and diarization
-        '''
-        segments = []
-        longest = ['',0,pydub.AudioSegment.empty()]
-        filepath = f"{self.bot.root}/unprocessed/"
 
-        for file in [f for f in os.listdir(filepath) 
-                    if os.path.isfile(os.path.join(filepath, f))]:
-            curr = []
-            curr.append(filepath + file)
-            seg = pydub.AudioSegment.from_file(curr[0], format="mp3")
-            seg_len = len(seg)
-            curr.append(seg_len)
-            curr.append(seg)
-                
-            # Determine the longest audio segment
-            if curr[1] > longest[1]:
-                segments.append(longest)
-                longest[0] = curr[0]
-                longest[1] = curr[1]
-                longest[2] = curr[2]
-            else:
-                segments.append(curr)
-
-        # Using the length of the longest file, we prepend silence to 
-        # each other file to make them the same length. This will allow
-        # us to sync the timestamps in the transcriptions and create one
-        # final script of the entire audio session
-        for file in segments:
-            curr_len = longest[1] - file[1]
-            silence = pydub.AudioSegment.silent(duration=curr_len)
-            final = silence + file[2]
-            final.export(file[0], format="mp3")
-
-        final = longest[2]
-        final.export(longest[0], format="mp3") 
-        
-        if not test:
-            self.transcribe(filepath, test=False)
-        
-    def transcribe(self, unfilepath, test: bool):
+    async def process_session(self, session: dict):
         '''
-        transcribe:
-        Handles WhisperX transcription of the files
+        process_session:
+        Transcribes, merges, and sends a single completed recording session.
         '''
-        self.logger.info(f"Now transcribing...")
-        
+        final_path = await self.bot.loop.run_in_executor(
+            None, self.transcribe_session, session
+        )
+        await self.send_file(session, final_path)
+
+    def _load_audio(self, filepath: str):
+        '''
+        _load_audio:
+        Lets pydub infer the actual container written by the sink.
+        '''
+        return pydub.AudioSegment.from_file(filepath)
+
+    def align_audio_tracks(self, session: dict) -> None:
+        '''
+        align_audio_tracks:
+        Pads shorter synchronized tracks at the end so timestamps keep the same
+        session zero point.
+        '''
+        speakers = session["manifest"]["speakers"]
+        if len(speakers) < 2:
+            return
+
+        loaded_tracks = []
+        max_duration = 0
+
+        for speaker in speakers:
+            filepath = os.path.join(session["raw_dir"], speaker["audio_file"])
+            audio = self._load_audio(filepath)
+            duration = len(audio)
+            loaded_tracks.append((speaker, filepath, audio, duration))
+            max_duration = max(max_duration, duration)
+
+        for speaker, filepath, audio, duration in loaded_tracks:
+            if duration >= max_duration:
+                continue
+
+            padding = pydub.AudioSegment.silent(duration=max_duration - duration)
+            padded = audio + padding
+            extension = os.path.splitext(speaker["audio_file"])[1].lstrip(".")
+            padded.export(filepath, format=extension)
+
+    def transcribe_session(self, session: dict) -> str:
+        '''
+        transcribe_session:
+        Handles transcription and transcript merging for one session.
+        '''
+        self.logger.info("Now transcribing session %s", session["session_id"])
+        os.makedirs(session["processed_dir"], exist_ok=True)
+        self.align_audio_tracks(session)
+
         model = faster_whisper.WhisperModel(
-            model_size_or_path=self.bot.model_size_or_path,
+            model_size_or_path=session["manifest"]["model_size_or_path"],
             device=self.bot.device,
             compute_type=self.bot.compute_type,
             download_root=self.bot.download_root,
-            local_files_only=self.bot.local_files_only       
+            local_files_only=self.bot.local_files_only
         )
-        pfilepath = f"{self.bot.root}/processed/"
-        
-        for file in [f for f in os.listdir(unfilepath) 
-                     if os.path.isfile(os.path.join(unfilepath, f))]:
+
+        for speaker in session["manifest"]["speakers"]:
+            audio_path = os.path.join(session["raw_dir"], speaker["audio_file"])
+            transcript_path = os.path.join(
+                session["processed_dir"], speaker["transcript_file"]
+            )
             segments, info = model.transcribe(
-                unfilepath + file,
+                audio_path,
                 language="en",
                 condition_on_previous_text=False,
                 word_timestamps=True,
                 vad_filter=True
-                )
-            self.logger.info(f"Detected language '{info.language}'"
-                             f" with probability {info.language_probability}")
-            
-            filename = pfilepath + file.replace('.mp3', '.txt')
-            with open(filename, 'w') as f:
+            )
+            self.logger.info(
+                "Detected language '%s' with probability %s",
+                info.language,
+                info.language_probability
+            )
+
+            with open(transcript_path, 'w') as f:
                 for segment in segments:
                     line = "[%.3fs] %s\n" % (segment.start, segment.text)
-                    f.write(line)        
-        
-        if not test:
-            self.merge(pfilepath)        
-        
-    def merge(self, pfilepath):
+                    f.write(line)
+
+        return self.merge_session(session)
+
+    def merge_session(self, session: dict) -> str:
         '''
-        merge:
-        Handles transcription merging and formatting
+        merge_session:
+        Merges per-speaker transcripts using manifest speaker metadata.
         '''
         lines = []
-        reg_transcript = r'(?P<timestamp>\[(?P<time_float>[0-9]+.[0-9]+)s\])\s\s(?P<string>.+)$'
-        reg_username = r'^.+/(?P<date>[0-9a-zA-Z]+)_(?P<username>.+)#'
-        date = ""
-        
-        for file in [f for f in os.listdir(pfilepath) 
-                    if os.path.isfile(os.path.join(pfilepath, f))]: 
-            
-            filename = pfilepath + file
-            match_user = re.match(reg_username, filename)
+        reg_transcript = (
+            r'^\[(?P<time_float>[0-9]+(?:\.[0-9]+)?)s\]\s+'
+            r'(?P<string>.+)$'
+        )
 
-            if date == "" and match_user is not None:
-                date = match_user.group('date')
-                
-            with open(filename, 'rb') as f:
+        for speaker in session["manifest"]["speakers"]:
+            transcript_path = os.path.join(
+                session["processed_dir"], speaker["transcript_file"]
+            )
+            if not os.path.exists(transcript_path):
+                continue
+
+            with open(transcript_path, 'rb') as f:
                 data = f.read().decode(errors='ignore')
-            
+
             for line in data.splitlines():
                 match_script = re.match(reg_transcript, line)
 
-                if match_script is not None and match_user is not None:
-                    curr = {
-                        'time_float': float(match_script.group('time_float')),
-                        'string': 
-                            match_script.group('timestamp') + " " +
-                            match_user.group('username') + ': "' +
-                            match_script.group('string') + '"' + "\n"
-                    }
-                    lines.append(curr)
-        
+                if match_script is not None:
+                    timestamp = float(match_script.group('time_float'))
+                    lines.append({
+                        'time_float': timestamp,
+                        'string':
+                            "- [%.3fs] " % timestamp +
+                            "**" + speaker["display_name"] + ':** ' +
+                            match_script.group('string').strip() + "\n"
+                    })
+
         final = sorted(lines, key=lambda d: d['time_float'])
-        
-        with open(f"{pfilepath}{date}_final.txt", 'w') as f:
+        final_path = os.path.join(
+            session["processed_dir"], f"{session['session_id']}_transcript.md"
+        )
+        os.makedirs(session["processed_dir"], exist_ok=True)
+
+        with open(final_path, 'w') as f:
+            f.write(f"# Sneaky Helper Transcript: {session['session_id']}\n\n")
+            f.write(f"- Model: `{session['manifest']['model_size_or_path']}`\n")
+            f.write(f"- Started: `{session['manifest']['started_at']}`\n")
+            f.write(f"- Stopped: `{session['manifest']['stopped_at']}`\n\n")
+
+            participants = session["manifest"].get("participants", [])
+            if participants:
+                f.write("## Voice Channel Participants\n\n")
+                for participant in participants:
+                    f.write(f"- {participant['display_name']}\n")
+                f.write("\n")
+
+            f.write("## Transcript\n\n")
             for line in final:
                 f.write(line['string'])
-                
-        self.bot.loop.create_task(self.send_file(ctx=None, pfilepath=pfilepath))
-    
+
+        return final_path
+
+    async def send_file(self, session: dict, final_path: str):
+        '''
+        send_file:
+        Sends the final transcript for this session to the configured channel.
+        '''
+        channel_id = session["manifest"].get("transcript_channel_id")
+        channel = self.bot.get_channel(channel_id) if channel_id else None
+
+        if channel is None:
+            self.logger.error("ERROR: transcript channel cannot be found!")
+            return
+
+        with open(final_path, 'rb') as f:
+            file = discord.File(f, filename=os.path.basename(final_path))
+            await channel.send(file=file)
+
+
 # this adds the cogs to bot
 def setup(bot) -> None:
     bot.add_cog(Transcription(bot))

@@ -7,6 +7,25 @@ import ctypes.util
 import SneakyBot
 import logging
 
+
+def find_opus_library():
+    '''
+    find_opus_library:
+    Finds libopus on macOS/Homebrew when ctypes cannot discover it.
+    '''
+    candidates = [
+        os.getenv("OPUS_LIBRARY_PATH"),
+        ctypes.util.find_library('opus'),
+        "/opt/homebrew/lib/libopus.dylib",
+        "/usr/local/lib/libopus.dylib",
+    ]
+
+    for candidate in candidates:
+        if candidate and os.path.exists(candidate):
+            return candidate
+
+    return None
+
 if __name__ == "__main__":
     # Check for config and grab it      
     try:
@@ -17,8 +36,9 @@ if __name__ == "__main__":
         sys.exit("'config.json' not found! Please add it and try again.")
             
     # Set up opus and such to make sure you can handle audio filesfiles
-    a = ctypes.util.find_library('opus')
-    discord.opus.load_opus(a) # type: ignore
+    opus_library = find_opus_library()
+    if opus_library:
+        discord.opus.load_opus(opus_library) # type: ignore
     if not discord.opus.is_loaded():
         sys.exit('Opus failed to load! Exiting...')
         
@@ -30,4 +50,7 @@ if __name__ == "__main__":
     dotenv.load_dotenv()          
     bot = SneakyBot.SneakyBot(config)
     bot.load_cogs()
-    bot.run(os.getenv("TOKEN"))
+    token = os.getenv("TOKEN")
+    if not token:
+        sys.exit("'TOKEN' is not set. Add it to .env and try again.")
+    bot.run(token)

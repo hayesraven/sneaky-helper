@@ -122,6 +122,7 @@ celerybeat.pid
 # Environments
 .env
 .venv
+.venv-py39-backup/
 env/
 venv/
 ENV/
@@ -163,10 +164,10 @@ cython_debug/
 *.wav
 
 # folders to ignore
-tests/
 cogs/tests.py
 unprocessed/*
 processed/*
+sessions/*
 models/*
 TODO
 .DS_Store

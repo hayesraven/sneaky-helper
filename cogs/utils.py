@@ -1,7 +1,5 @@
 from discord.ext import commands
 import discord
-import sys
-import json
 import logging
 
 class Utils(commands.Cog, name="utils"):
@@ -38,7 +36,13 @@ class Utils(commands.Cog, name="utils"):
                 "**/listen @<username>** to remove a user from the Do Not "
                 "To Listen list\n"
                 "**/stop** to stop a recording and save the data\n"
-                "**/start** to start a recording in the current channel\n"),
+                "**/start** to start a recording in the current channel\n"
+                "**/set_transcript_channel #channel** to choose where "
+                "transcripts are sent\n"
+                "**/show_transcript_channel** to show the current transcript "
+                "channel\n"
+                "**/set_whisper_model <model>** to choose the Whisper model\n"
+                "**/show_whisper_model** to show the active Whisper model\n"),
             color=0x546e7a)
                                                 
         await ctx.respond(embed=embed_var)
@@ -53,7 +57,8 @@ class Utils(commands.Cog, name="utils"):
         Action to add a user ID to the ignore list for recording
         '''
         config = self.bot.config
-        config["ignore_members"].append(user.id)
+        if user.id not in config["ignore_members"]:
+            config["ignore_members"].append(user.id)
 
         await self.update_config(config)        
         await ctx.respond(f"Added {user.name} to the ignore list!")
@@ -68,8 +73,9 @@ class Utils(commands.Cog, name="utils"):
         Action to remove a user ID from the ignore list for recording
         '''
         config = self.bot.config
-        
-        config["ignore_members"].remove(user.id)
+
+        if user.id in config["ignore_members"]:
+            config["ignore_members"].remove(user.id)
         
         await self.update_config(config)        
         await ctx.respond(f"I will now eavesdrop on {user.name}!")
@@ -92,16 +98,77 @@ class Utils(commands.Cog, name="utils"):
             
         await ctx.respond("Currently ignoring the following members for "
                           f"transcription:\n{users}")
+
+    @commands.slash_command(
+        name="set_transcript_channel",
+        description="Choose the channel where transcripts are posted"
+        )
+    async def set_transcript_channel(
+            self, ctx, channel: discord.TextChannel):
+        '''
+        set_transcript_channel:
+        Stores the transcript delivery channel.
+        '''
+        config = self.bot.config
+        config["transcript_channel_id"] = channel.id
+
+        await self.update_config(config)
+        await ctx.respond(f"Transcripts will be sent to {channel.mention}.")
+
+    @commands.slash_command(
+        name="show_transcript_channel",
+        description="Show the configured transcript channel"
+        )
+    async def show_transcript_channel(self, ctx):
+        '''
+        show_transcript_channel:
+        Displays the current transcript delivery channel.
+        '''
+        channel_id = self.bot.transcript_channel_id
+        channel = self.bot.get_channel(channel_id) if channel_id else None
+
+        if channel:
+            await ctx.respond(f"Transcripts are sent to {channel.mention}.")
+        else:
+            await ctx.respond("No transcript channel is configured yet.")
+
+    @commands.slash_command(
+        name="set_whisper_model",
+        description="Choose the Whisper model for future transcriptions"
+        )
+    async def set_whisper_model(self, ctx, model: str):
+        '''
+        set_whisper_model:
+        Stores the model used when new recording sessions are transcribed.
+        '''
+        config = self.bot.config
+        config["model_size_or_path"] = model
+
+        await self.update_config(config)
+        await ctx.respond(f"Whisper model set to `{model}`.")
+
+    @commands.slash_command(
+        name="show_whisper_model",
+        description="Show the active Whisper model and runtime settings"
+        )
+    async def show_whisper_model(self, ctx):
+        '''
+        show_whisper_model:
+        Displays the active transcription runtime settings.
+        '''
+        await ctx.respond(
+            "Whisper settings:\n"
+            f"Model: `{self.bot.model_size_or_path}`\n"
+            f"Device: `{self.bot.device}`\n"
+            f"Compute type: `{self.bot.compute_type}`"
+        )
         
     async def update_config(self, config):
         '''
         update_config:
         Updates the config.json for SneakyBot
         '''
-        with open(f"{self.bot.root}/config.json", 'w') as f:
-            json.dump(config, f, indent=4)
-            
-        self.bot.config = config
+        self.bot.update_config(config)
 
 # this adds the cogs to bot
 def setup(bot) -> None:

@@ -3,9 +3,11 @@
     "ignore_members": [
         1139938844834271242
     ],
-    "model_size_or_path": "large-v2",
+    "model_size_or_path": "base",
     "device": "cpu",
-    "compute_type": "float32",
+    "compute_type": "int8",
     "download_root": "models/",
-    "local_files_only": false
+    "local_files_only": false,
+    "transcript_channel_id": null,
+    "debug_guild_ids": []
 }
